@@ -1,0 +1,108 @@
+# 模型配置文件
+# 全局GPU加速开关（true：所有模型使用GPU，false：所有模型使用CPU）
+global_gpu_acceleration: false
+
+# 大语言模型配置 - DeepSeek API
+llm:
+  provider: deepseek
+  api_key: sk-27e712e3a6c64533884adc0ad040ff3b
+  base_url: https://api.deepseek.com
+  model_name: deepseek-chat
+  max_tokens: 4096
+  temperature: 0.7
+  stream: true
+
+# 嵌入模型配置 - 本地768维模型
+embedding_model:
+  model_name: text-embedding-3-small  # 本地保存的模型名称
+  huggingface_model: sentence-transformers/all-mpnet-base-v2  # Hugging Face上的实际模型名称
+  model_path: ./models/embedding/text-embedding-3-small
+  vector_size: 768
+  batch_size: 32
+  max_length: 512
+  device: cpu  # 根据global_gpu_acceleration自动调整
+  
+  # 可选的备用模型（按优先级排序）
+  alternative_models:
+    - name: sentence-transformers/all-mpnet-base-v2
+      vector_size: 768
+      description: "高质量768维模型"
+    - name: sentence-transformers/paraphrase-MiniLM-L12-v2
+      vector_size: 384
+      description: "轻量级384维模型"
+    - name: sentence-transformers/all-MiniLM-L6-v2
+      vector_size: 384
+      description: "超轻量级384维模型"
+
+# OCR模型配置 - 本地模型
+ocr_model:
+  # PaddleOCR配置
+  ocr_type: paddleocr
+  det_model_dir: ./models/ocr/det
+  rec_model_dir: ./models/ocr/rec
+  cls_model_dir: ./models/ocr/cls
+  use_angle_cls: true
+  lang: ch
+  use_gpu: false  # 根据global_gpu_acceleration自动调整
+  
+  # 表格识别模型
+  table_model_dir: ./models/ocr/table
+  
+  # 图表识别模型
+  chart_model_dir: ./models/ocr/chart
+
+# PDF解析模型配置
+pdf_parser:
+  # PyMuPDF配置
+  engine: pymupdf
+  extract_images: true
+  extract_tables: true
+  extract_text: true
+  dpi: 300
+
+# 图像处理模型配置
+image_models:
+  # 图像分类模型
+  image_classifier:
+    model_path: ./models/image/classifier
+    device: cpu
+  
+  # 图表分析模型
+  chart_analyzer:
+    model_path: ./models/image/chart_analyzer
+    device: cpu
+
+# 文本处理模型配置
+text_models:
+  # 文本分割器
+  text_splitter:
+    chunk_size: 500
+    chunk_overlap: 50
+    separators: ["\n\n", "\n", "。", "！", "？", ";", "；"]
+  
+  # 关键词提取
+  keyword_extractor:
+    model_path: ./models/text/keyword_extractor
+    max_keywords: 10
+
+# 向量数据库配置
+vector_db:
+  index_type: IVF_FLAT
+  metric_type: L2
+  nlist: 1024
+  nprobe: 10
+
+# 模型下载配置
+model_download:
+  download_dir: ./models
+  huggingface_mirror: https://hf-mirror.com
+  auto_download: true
+  
+# 模型路径映射
+model_paths:
+  embedding_model: ./models/embedding/text-embedding-3-small
+  ocr_det_model: ./models/ocr/det/ch_PP-OCRv4_det_infer
+  ocr_rec_model: ./models/ocr/rec/ch_PP-OCRv4_rec_infer  
+  ocr_cls_model: ./models/ocr/cls/ch_ppocr_mobile_v2.0_cls_infer
+  table_model: ./models/ocr/table/SLANet
+  chart_model: ./models/ocr/chart/chart_analyzer 

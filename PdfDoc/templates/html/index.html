@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF智能文件管理系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/components.css') }}">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📄</text></svg>">
+    <!-- 引入Font Awesome图标 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <header class="header">
+        <div class="header-content">
+            <div class="logo">
+                <i class="fas fa-file-pdf"></i>
+                <span class="logo-text">PDF智能文件管理系统</span>
+            </div>
+            <div class="header-right">
+                <div class="user-info">
+                    <i class="fas fa-user-circle"></i>
+                    <span class="username">管理员</span>
+                </div>
+                <button class="btn-setting" title="设置">
+                    <i class="fas fa-cog"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- 主体容器 -->
+    <div class="container">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <nav class="nav-menu">
+                <ul>
+                    <li class="nav-item active" data-tab="file-management">
+                        <a href="#" class="nav-link">
+                            <i class="fas fa-folder-open"></i>
+                            <span>文件管理</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" data-tab="intelligent-search">
+                        <a href="#" class="nav-link">
+                            <i class="fas fa-search"></i>
+                            <span>智能检索</span>
+                        </a>
+                    </li>
+                    <li class="nav-item" data-tab="analytics">
+                        <a href="#" class="nav-link">
+                            <i class="fas fa-chart-bar"></i>
+                            <span>使用统计</span>
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- 主内容区域 -->
+        <main class="main-content">
+            <!-- 文件管理页面 -->
+            <div id="file-management" class="tab-content active">
+                <div class="page-header">
+                    <h1 class="page-title">文件管理</h1>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" id="btn-upload">
+                            <i class="fas fa-upload"></i>
+                            上传文件
+                        </button>
+                        <button class="btn btn-secondary" id="btn-refresh">
+                            <i class="fas fa-sync-alt"></i>
+                            刷新
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 文件操作栏 -->
+                <div class="file-toolbar">
+                    <div class="toolbar-left">
+                        <button class="btn btn-danger btn-sm" id="btn-batch-delete" disabled>
+                            <i class="fas fa-trash"></i>
+                            批量删除
+                        </button>
+                        <span class="selected-count">已选择 <span id="selected-count">0</span> 个文件</span>
+                    </div>
+                    <div class="toolbar-right">
+                        <div class="search-box">
+                            <i class="fas fa-search"></i>
+                            <input type="text" id="file-search" placeholder="搜索文件名...">
+                        </div>
+                        <div class="view-toggle">
+                            <button class="btn btn-sm active" data-view="list">
+                                <i class="fas fa-list"></i>
+                            </button>
+                            <button class="btn btn-sm" data-view="grid">
+                                <i class="fas fa-th"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 文件列表 -->
+                <div class="file-list-container">
+                    <div class="file-list" id="file-list">
+                        <!-- 文件列表将通过JavaScript动态生成 -->
+                        <div class="file-list-empty">
+                            <i class="fas fa-folder-open"></i>
+                            <p>暂无文件，请上传PDF文件开始使用</p>
+                        </div>
+                    </div>
+                    
+                    <!-- 分页组件 -->
+                    <div class="pagination-container">
+                        <div class="pagination" id="pagination">
+                            <!-- 分页将通过JavaScript动态生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 智能检索页面 -->
+            <div id="intelligent-search" class="tab-content">
+                <div class="page-header">
+                    <h1 class="page-title">智能检索</h1>
+                    <div class="page-actions">
+                        <button class="btn btn-primary" id="btn-new-chat">
+                            <i class="fas fa-plus"></i>
+                            新建对话
+                        </button>
+                    </div>
+                </div>
+
+                <div class="chat-container">
+                    <!-- 会话列表 -->
+                    <div class="chat-sidebar">
+                        <div class="chat-sessions">
+                            <h3>对话记录</h3>
+                            <div class="session-list" id="session-list">
+                                <!-- 会话列表将通过JavaScript动态生成 -->
+                                <div class="session-list-empty">
+                                    <p>暂无对话记录</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 聊天主区域 -->
+                    <div class="chat-main">
+                        <div class="chat-header">
+                            <div class="chat-title">
+                                <h3 id="current-session-name">智能助手</h3>
+                                <span class="chat-status" id="chat-status">准备就绪</span>
+                            </div>
+                            <div class="chat-actions">
+                                <button class="btn btn-sm" id="btn-clear-chat" title="清空对话">
+                                    <i class="fas fa-broom"></i>
+                                </button>
+                                <button class="btn btn-sm" id="btn-download-chat" title="导出对话">
+                                    <i class="fas fa-download"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 聊天消息区域 -->
+                        <div class="chat-messages" id="chat-messages">
+                            <div class="welcome-message">
+                                <div class="assistant-avatar">
+                                    <i class="fas fa-robot"></i>
+                                </div>
+                                <div class="message-content">
+                                    <h4>欢迎使用PDF智能检索系统！</h4>
+                                    <p>我可以帮助您：</p>
+                                    <ul>
+                                        <li>📄 搜索和分析PDF文档内容</li>
+                                        <li>📊 提取表格和图表信息</li>
+                                        <li>🔍 智能问答和知识检索</li>
+                                        <li>📝 生成文档摘要和要点</li>
+                                    </ul>
+                                    <p>请先上传PDF文件，然后向我提问吧！</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 输入区域 -->
+                        <div class="chat-input-container">
+                            <div class="file-selector">
+                                <label for="search-files">选择检索范围：</label>
+                                <select id="search-files" multiple>
+                                    <option value="">所有文件</option>
+                                    <!-- 文件选项将通过JavaScript动态生成 -->
+                                </select>
+                            </div>
+                            <div class="input-area">
+                                <div class="input-box">
+                                    <textarea id="chat-input" placeholder="请输入您的问题..." rows="3"></textarea>
+                                    <div class="input-actions">
+                                        <button class="btn btn-sm" id="btn-voice-input" title="语音输入">
+                                            <i class="fas fa-microphone"></i>
+                                        </button>
+                                        <button class="btn btn-primary" id="btn-send-message">
+                                            <i class="fas fa-paper-plane"></i>
+                                            发送
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="suggestions" id="suggestions">
+                                    <!-- 搜索建议将动态显示 -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 使用统计页面 -->
+            <div id="analytics" class="tab-content">
+                <div class="page-header">
+                    <h1 class="page-title">使用统计</h1>
+                    <div class="page-actions">
+                        <select id="analytics-period">
+                            <option value="7">最近7天</option>
+                            <option value="30">最近30天</option>
+                            <option value="90">最近90天</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="analytics-container">
+                    <!-- 统计卡片 -->
+                    <div class="stats-cards">
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-file-pdf"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="total-files">0</h3>
+                                <p>总文件数</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-search"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="total-searches">0</h3>
+                                <p>检索次数</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-comments"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="total-sessions">0</h3>
+                                <p>对话会话</p>
+                            </div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="stat-icon">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="stat-content">
+                                <h3 id="avg-response-time">0s</h3>
+                                <p>平均响应时间</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 热门查询 -->
+                    <div class="popular-queries">
+                        <h3>热门查询</h3>
+                        <div class="query-list" id="popular-queries">
+                            <!-- 热门查询将动态生成 -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 文件上传模态框 -->
+    <div class="modal" id="upload-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>上传PDF文件</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="upload-area" id="upload-area">
+                    <div class="upload-icon">
+                        <i class="fas fa-cloud-upload-alt"></i>
+                    </div>
+                    <p>拖拽PDF文件到此处，或点击选择文件</p>
+                    <input type="file" id="file-input" accept=".pdf" multiple hidden>
+                    <button class="btn btn-primary" id="btn-select-file">选择文件</button>
+                </div>
+                <div class="upload-progress" id="upload-progress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progress-fill"></div>
+                    </div>
+                    <p class="progress-text" id="progress-text">上传中...</p>
+                </div>
+                <div class="upload-tips">
+                    <h4>注意事项：</h4>
+                    <ul>
+                        <li>支持PDF格式文件</li>
+                        <li>单个文件大小不超过100MB</li>
+                        <li>上传后将自动进行内容分析</li>
+                        <li>分析完成后即可进行智能检索</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 加载指示器 -->
+    <div class="loading-overlay" id="loading-overlay">
+        <div class="loading-spinner">
+            <div class="spinner"></div>
+            <p>处理中...</p>
+        </div>
+    </div>
+
+    <!-- 通知提示 -->
+    <div class="notification-container" id="notification-container">
+        <!-- 通知将动态添加 -->
+    </div>
+
+    <!-- 引入JavaScript文件 -->
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/api.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/file-manager.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html> 
