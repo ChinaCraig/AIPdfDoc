@@ -878,7 +878,11 @@ window.chatManager = null;
 
 // 初始化聊天管理器
 document.addEventListener('DOMContentLoaded', () => {
-    if (Utils.DOM.$('#intelligent-search')) {
-        window.chatManager = new ChatManager();
+    try {
+        if (Utils && Utils.DOM && Utils.DOM.$('#intelligent-search')) {
+            window.chatManager = new ChatManager();
+        }
+    } catch (error) {
+        console.error('初始化聊天管理器失败:', error);
     }
 }); 

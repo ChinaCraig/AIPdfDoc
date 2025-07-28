@@ -440,11 +440,11 @@ const ReliableAPI = {
 
 // 为所有API方法添加重试功能
 Object.keys(FileAPI).forEach(method => {
-    ReliableAPI.FileAPI[method] = (...args) => retrier.execute(FileAPI[method], ...args);
+    ReliableAPI.FileAPI[method] = (...args) => retrier.execute(() => FileAPI[method](...args));
 });
 
 Object.keys(SearchAPI).forEach(method => {
-    ReliableAPI.SearchAPI[method] = (...args) => retrier.execute(SearchAPI[method], ...args);
+    ReliableAPI.SearchAPI[method] = (...args) => retrier.execute(() => SearchAPI[method](...args));
 });
 
 // 请求拦截器

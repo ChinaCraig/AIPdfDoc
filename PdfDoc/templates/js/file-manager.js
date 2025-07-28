@@ -56,7 +56,7 @@ class FileManager {
                 this.searchKeyword = e.target.value.trim();
                 this.currentPage = 1;
                 this.loadFileList();
-            });
+            }, Utils.CONSTANTS.DEBOUNCE_DELAY);
             searchInput.addEventListener('input', debouncedSearch);
         }
 
@@ -841,7 +841,28 @@ window.fileManager = null;
 
 // 初始化文件管理器
 document.addEventListener('DOMContentLoaded', () => {
-    if (Utils.DOM.$('#file-management')) {
-        window.fileManager = new FileManager();
+    try {
+        // 确保Utils对象完全加载
+        if (typeof Utils !== 'undefined' && 
+            Utils.DOM && 
+            typeof Utils.DOM.$ === 'function' && 
+            Utils.DOM.$('#file-management')) {
+            window.fileManager = new FileManager();
+        } else {
+            console.warn('文件管理器初始化被跳过：Utils对象或DOM元素未准备好');
+        }
+    } catch (error) {
+        console.error('初始化文件管理器失败:', error);
+        // 显示用户友好的错误消息
+        const fileManagement = document.querySelector('#file-management');
+        if (fileManagement) {
+            fileManagement.innerHTML = `
+                <div class="init-error">
+                    <h3>文件管理器初始化失败</h3>
+                    <p>请刷新页面重试</p>
+                    <button class="btn btn-primary" onclick="location.reload()">刷新页面</button>
+                </div>
+            `;
+        }
     }
 }); 

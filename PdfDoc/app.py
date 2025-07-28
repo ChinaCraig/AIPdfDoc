@@ -276,25 +276,31 @@ def main():
     print("启动时间:", datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     print("="*60)
     
-    # 环境检查
-    print("正在进行环境检查...")
-    try:
-        # 运行环境检查
-        environment_success = asyncio.run(environment_check())
-        
-        if not environment_success:
-            print("❌ 环境检查失败，部分功能可能无法正常使用")
-            print("请检查日志文件 ./logs/environment_check.log 获取详细信息")
-            print("⚠️  自动继续启动系统...")
-        else:
-            print("✅ 环境检查通过")
+    # 检查是否跳过环境检查
+    skip_env_check = os.environ.get('SKIP_ENV_CHECK', '0') == '1'
     
-    except KeyboardInterrupt:
-        print("\n系统启动已取消")
-        return
-    except Exception as e:
-        print(f"❌ 环境检查过程中发生错误: {e}")
-        print("⚠️  自动继续启动系统...")
+    if not skip_env_check and not os.environ.get('WERKZEUG_RUN_MAIN'):
+        # 环境检查 (仅在主进程执行，避免重载器重复执行)
+        print("正在进行环境检查...")
+        try:
+            # 运行环境检查
+            environment_success = asyncio.run(environment_check())
+            
+            if not environment_success:
+                print("❌ 环境检查失败，部分功能可能无法正常使用")
+                print("请检查日志文件 ./logs/environment_check.log 获取详细信息")
+                print("⚠️  自动继续启动系统...")
+            else:
+                print("✅ 环境检查通过")
+        
+        except KeyboardInterrupt:
+            print("\n系统启动已取消")
+            return
+        except Exception as e:
+            print(f"❌ 环境检查过程中发生错误: {e}")
+            print("⚠️  自动继续启动系统...")
+    else:
+        print("⚠️  已跳过环境检查")
     
     # 创建Flask应用
     app = create_app()

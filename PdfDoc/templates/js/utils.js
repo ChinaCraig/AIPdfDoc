@@ -791,25 +791,17 @@ const ErrorHandler = {
         // 捕获未处理的Promise拒绝
         window.addEventListener('unhandledrejection', (event) => {
             console.error('未处理的Promise拒绝:', event.reason);
-            Notification.error('系统错误', '系统发生错误，请稍后重试');
+            // 只在开发环境显示错误通知
+            if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+                Notification.error('系统错误', '系统发生错误，请稍后重试');
+            }
         });
 
         // 捕获JavaScript错误
         window.addEventListener('error', (event) => {
             console.error('JavaScript错误:', event.error);
+            // 避免不必要的错误提示，只记录到控制台
         });
-    }
-};
-
-// 初始化工具
-const Utils = {
-    /**
-     * 初始化所有工具
-     */
-    init() {
-        Notification.init();
-        Modal.init();
-        ErrorHandler.init();
     }
 };
 
@@ -828,10 +820,20 @@ window.Utils = {
     URLUtils,
     Clipboard,
     ErrorHandler,
-    init: Utils.init
+    /**
+     * 初始化所有工具
+     */
+    init() {
+        Notification.init();
+        Modal.init();
+        ErrorHandler.init();
+    }
 };
+
+// 确保DOM方法直接可用
+window.Utils.DOM = DOM;
 
 // 页面加载完成后初始化
 document.addEventListener('DOMContentLoaded', () => {
-    Utils.init();
+    window.Utils.init();
 }); 

@@ -170,6 +170,8 @@ def main():
     os.environ['FLASK_PORT'] = str(args.port)
     if args.debug:
         os.environ['FLASK_DEBUG'] = '1'
+    # 标记已经进行过环境检查，避免重复检查
+    os.environ['SKIP_ENV_CHECK'] = '1'
     
     # 导入并启动主应用
     try:
