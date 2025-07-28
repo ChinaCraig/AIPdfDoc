@@ -182,11 +182,13 @@ const FileAPI = {
             page_size: pageSize
         };
 
-        if (keyword) {
-            params.keyword = keyword;
+        // 如果有搜索关键词，使用搜索接口
+        if (keyword && keyword.trim()) {
+            params.keyword = keyword.trim();
+            return apiClient.get('/file/search', params);
+        } else {
+            return apiClient.get('/file/list', params);
         }
-
-        return apiClient.get('/file/list', params);
     },
 
     /**

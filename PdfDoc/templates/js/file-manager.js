@@ -14,6 +14,7 @@ class FileManager {
         this.sortOrder = 'desc';
         this.viewMode = 'list';
         this.autoRefreshInterval = null;
+        this.globalClickHandlerBound = false;
         
         this.init();
     }
@@ -22,9 +23,52 @@ class FileManager {
      * 初始化文件管理器
      */
     init() {
+        this.initializeViewMode();
         this.bindEvents();
         this.loadFileList();
         this.startAutoRefresh();
+    }
+
+    /**
+     * 初始化视图模式
+     */
+    initializeViewMode() {
+        // 从本地存储读取视图模式偏好
+        const savedViewMode = Utils.Storage.get('file_view_mode');
+        if (savedViewMode && (savedViewMode === 'list' || savedViewMode === 'grid')) {
+            this.viewMode = savedViewMode;
+        }
+        
+        // 确保DOM元素就绪后再设置样式
+        setTimeout(() => {
+            this.applyViewMode();
+        }, 0);
+    }
+    
+    /**
+     * 应用视图模式样式
+     */
+    applyViewMode() {
+        // 设置文件列表的CSS类
+        const fileList = Utils.DOM.$('#file-list');
+        if (fileList) {
+            Utils.DOM.removeClass(fileList, 'list-view');
+            Utils.DOM.removeClass(fileList, 'grid-view');
+            Utils.DOM.addClass(fileList, this.viewMode + '-view');
+            
+            console.log('Applied view mode:', this.viewMode, 'to element:', fileList);
+        } else {
+            console.warn('File list element not found during view mode initialization');
+        }
+        
+        // 设置按钮的活动状态
+        const viewToggleBtns = Utils.DOM.$$('.view-toggle .btn');
+        viewToggleBtns.forEach(btn => {
+            Utils.DOM.removeClass(btn, 'active');
+            if (btn.dataset.view === this.viewMode) {
+                Utils.DOM.addClass(btn, 'active');
+            }
+        });
     }
 
     /**
@@ -112,7 +156,8 @@ class FileManager {
         });
 
         if (selectFileBtn) {
-            selectFileBtn.addEventListener('click', () => {
+            selectFileBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // 防止事件冒泡触发uploadArea的点击事件
                 fileInput.click();
             });
         }
@@ -132,12 +177,20 @@ class FileManager {
         if (!fileList) return;
 
         // 事件委托
-        Utils.EventUtils.delegate(fileList, '.file-checkbox', 'change', (e) => {
+        Utils.EventUtils.delegate(fileList, '.form-checkbox', 'change', (e) => {
             const fileId = parseInt(e.target.dataset.fileId);
+            if (isNaN(fileId)) {
+                console.error('Invalid file ID:', e.target.dataset.fileId);
+                return;
+            }
+            
+            const card = e.target.closest('.file-card');
             if (e.target.checked) {
                 this.selectedFiles.add(fileId);
+                if (card) Utils.DOM.addClass(card, 'selected');
             } else {
                 this.selectedFiles.delete(fileId);
+                if (card) Utils.DOM.removeClass(card, 'selected');
             }
             this.updateSelectionUI();
         });
@@ -145,32 +198,78 @@ class FileManager {
         // 文件操作按钮
         Utils.EventUtils.delegate(fileList, '.btn-delete-file', 'click', (e) => {
             e.stopPropagation();
-            const fileId = parseInt(e.target.dataset.fileId);
+            const button = e.target.closest('.btn-delete-file');
+            const fileId = parseInt(button.dataset.fileId);
+            
+            // 关闭下拉菜单（如果在卡片视图中）
+            this.closeAllDropdowns();
+            
             this.deleteFile(fileId);
         });
 
         Utils.EventUtils.delegate(fileList, '.btn-rename-file', 'click', (e) => {
             e.stopPropagation();
-            const fileId = parseInt(e.target.dataset.fileId);
+            const button = e.target.closest('.btn-rename-file');
+            const fileId = parseInt(button.dataset.fileId);
+            
+            // 关闭下拉菜单（如果在卡片视图中）
+            this.closeAllDropdowns();
+            
             this.renameFile(fileId);
         });
 
         Utils.EventUtils.delegate(fileList, '.btn-view-file', 'click', (e) => {
             e.stopPropagation();
-            const fileId = parseInt(e.target.dataset.fileId);
+            const button = e.target.closest('.btn-view-file');
+            const fileId = parseInt(button.dataset.fileId);
+            
+            // 关闭下拉菜单（如果在卡片视图中）
+            this.closeAllDropdowns();
+            
             this.viewFileInfo(fileId);
         });
 
+        // 卡片视图下拉菜单按钮
+        Utils.EventUtils.delegate(fileList, '.dropdown-toggle', 'click', (e) => {
+            this.handleDropdownToggle(e);
+        });
+
+        // 卡片视图下拉菜单按钮内的图标
+        Utils.EventUtils.delegate(fileList, '.dropdown-toggle i', 'click', (e) => {
+            this.handleDropdownToggle(e);
+        });
+
+        // 点击其他地方关闭下拉菜单（只绑定一次）
+        if (!this.globalClickHandlerBound) {
+            document.addEventListener('click', (e) => {
+                // 如果点击的不是下拉菜单相关元素，则关闭所有下拉菜单
+                if (!e.target.closest('.dropdown')) {
+                    this.closeAllDropdowns();
+                }
+            });
+            this.globalClickHandlerBound = true;
+        }
+
         // 全选/取消全选
         Utils.EventUtils.delegate(fileList, '#select-all-files', 'change', (e) => {
-            const checkboxes = fileList.querySelectorAll('.file-checkbox');
+            const checkboxes = fileList.querySelectorAll('.form-checkbox');
             checkboxes.forEach(checkbox => {
+                if (checkbox.id === 'select-all-files') return; // 跳过全选框本身
+                
                 checkbox.checked = e.target.checked;
                 const fileId = parseInt(checkbox.dataset.fileId);
+                if (isNaN(fileId)) {
+                    console.error('Invalid file ID in select all:', checkbox.dataset.fileId);
+                    return;
+                }
+                
+                const card = checkbox.closest('.file-card');
                 if (e.target.checked) {
                     this.selectedFiles.add(fileId);
+                    if (card) Utils.DOM.addClass(card, 'selected');
                 } else {
                     this.selectedFiles.delete(fileId);
+                    if (card) Utils.DOM.removeClass(card, 'selected');
                 }
             });
             this.updateSelectionUI();
@@ -224,13 +323,16 @@ class FileManager {
     validateFile(file) {
         // 检查文件类型
         if (!Utils.Validator.isValidFileType(file, [Utils.CONSTANTS.FILE_TYPES.PDF])) {
-            Utils.Notification.error('文件类型错误', `文件 ${file.name} 不是PDF格式`);
+            const fileExtension = file.name.toLowerCase().split('.').pop();
+            Utils.Notification.error('文件类型错误', 
+                `文件 ${file.name} 不是PDF格式。文件类型: ${file.type || '未知'}, 扩展名: .${fileExtension}`);
             return false;
         }
 
         // 检查文件大小
         if (!Utils.Validator.isValidFileSize(file, Utils.CONSTANTS.MAX_FILE_SIZE)) {
-            Utils.Notification.error('文件过大', `文件 ${file.name} 超过100MB限制`);
+            const sizeMB = (file.size / 1024 / 1024).toFixed(2);
+            Utils.Notification.error('文件过大', `文件 ${file.name} 大小为 ${sizeMB}MB，超过100MB限制`);
             return false;
         }
 
@@ -389,6 +491,9 @@ class FileManager {
 
         fileList.innerHTML = html;
         
+        // 清理无效的选择
+        this.cleanupInvalidSelections(files);
+        
         // 更新选择状态
         this.updateFileSelection();
     }
@@ -410,13 +515,8 @@ class FileManager {
                     <div class="file-icon">
                         <i class="fas fa-file-pdf"></i>
                     </div>
-                    <div class="file-info">
-                        <div class="file-name" title="${Utils.StringUtils.escapeHtml(file.original_name)}">
-                            ${Utils.StringUtils.truncate(file.original_name, 30)}
-                        </div>
-                        <div class="file-meta">
-                            <span>ID: ${file.id}</span>
-                        </div>
+                    <div class="file-name" title="${Utils.StringUtils.escapeHtml(file.original_name)}">
+                        ${Utils.StringUtils.truncate(file.original_name, 30)}
                     </div>
                     <div class="file-size">${fileSize}</div>
                     <div class="file-status">
@@ -441,47 +541,61 @@ class FileManager {
             `;
         } else {
             // 网格视图
+            const progressBarHTML = this.renderProgressBar(file);
             return `
                 <div class="file-card" data-file-id="${file.id}">
                     <div class="file-card-header">
-                        <div class="file-checkbox">
+                        <div class="file-card-checkbox">
                             <input type="checkbox" class="form-checkbox" data-file-id="${file.id}">
                         </div>
                         <div class="file-card-actions">
                             <div class="dropdown">
-                                <button class="btn btn-sm dropdown-toggle">
+                                <button class="dropdown-toggle" type="button">
                                     <i class="fas fa-ellipsis-v"></i>
                                 </button>
                                 <div class="dropdown-menu">
                                     <button class="dropdown-item btn-view-file" data-file-id="${file.id}">
-                                        <i class="fas fa-eye"></i> 查看详情
+                                        <i class="fas fa-eye"></i>
+                                        <span>查看详情</span>
                                     </button>
                                     <button class="dropdown-item btn-rename-file" data-file-id="${file.id}">
-                                        <i class="fas fa-edit"></i> 重命名
+                                        <i class="fas fa-edit"></i>
+                                        <span>重命名</span>
                                     </button>
                                     <div class="dropdown-divider"></div>
                                     <button class="dropdown-item btn-delete-file" data-file-id="${file.id}">
-                                        <i class="fas fa-trash"></i> 删除
+                                        <i class="fas fa-trash"></i>
+                                        <span>删除</span>
                                     </button>
                                 </div>
                             </div>
                         </div>
                     </div>
-                    <div class="file-card-icon">
-                        <i class="fas fa-file-pdf"></i>
-                    </div>
-                    <div class="file-card-info">
-                        <div class="file-name" title="${Utils.StringUtils.escapeHtml(file.original_name)}">
-                            ${Utils.StringUtils.truncate(file.original_name, 20)}
+                    <div class="file-card-body">
+                        <div class="file-card-icon">
+                            <i class="fas fa-file-pdf"></i>
                         </div>
-                        <div class="file-size">${fileSize}</div>
-                        <div class="file-time">${uploadTime}</div>
-                    </div>
-                    <div class="file-card-status">
-                        <div class="status-badge ${statusInfo.class}">
-                            ${statusInfo.text}
+                        <div class="file-card-info">
+                            <div class="file-name" title="${Utils.StringUtils.escapeHtml(file.original_name)}">
+                                ${Utils.StringUtils.truncate(file.original_name, 25)}
+                            </div>
+                            <div class="file-meta">
+                                <div class="file-meta-item">
+                                    <div class="file-meta-label">文件大小</div>
+                                    <div class="file-meta-value">${fileSize}</div>
+                                </div>
+                                <div class="file-meta-item">
+                                    <div class="file-meta-label">上传时间</div>
+                                    <div class="file-meta-value">${Utils.StringUtils.formatTime(file.created_at, 'MM-DD')}</div>
+                                </div>
+                            </div>
                         </div>
-                        ${this.renderProgressBar(file)}
+                        <div class="file-card-status">
+                            <div class="status-badge ${statusInfo.class}">
+                                ${statusInfo.text}
+                            </div>
+                            ${progressBarHTML ? `<div class="progress-container">${progressBarHTML}</div>` : ''}
+                        </div>
                     </div>
                 </div>
             `;
@@ -511,7 +625,7 @@ class FileManager {
                 <div class="progress-bar">
                     <div class="progress-fill" style="width: ${file.process_progress}%"></div>
                 </div>
-                <span class="progress-text">${file.process_progress}%</span>
+                <div class="progress-text">${file.process_progress}%</div>
             `;
         }
         return '';
@@ -620,13 +734,49 @@ class FileManager {
     }
 
     /**
+     * 清理无效的选择（已删除或不在当前列表中的文件）
+     */
+    cleanupInvalidSelections(currentFiles) {
+        if (!currentFiles || currentFiles.length === 0) {
+            this.selectedFiles.clear();
+            return;
+        }
+        
+        const currentFileIds = new Set(currentFiles.map(file => file.id));
+        const selectedFileIds = Array.from(this.selectedFiles);
+        
+        // 如果是在搜索模式，保留所有选择
+        if (this.searchKeyword && this.searchKeyword.trim()) {
+            return;
+        }
+        
+        // 移除不在当前文件列表中的选择（仅在非搜索模式下）
+        selectedFileIds.forEach(fileId => {
+            if (!currentFileIds.has(fileId)) {
+                this.selectedFiles.delete(fileId);
+            }
+        });
+    }
+
+    /**
      * 更新选择状态
      */
     updateFileSelection() {
-        const checkboxes = Utils.DOM.$$('.file-checkbox input[type="checkbox"]:not(#select-all-files)');
+        const checkboxes = Utils.DOM.$$('.form-checkbox:not(#select-all-files)');
         checkboxes.forEach(checkbox => {
             const fileId = parseInt(checkbox.dataset.fileId);
-            checkbox.checked = this.selectedFiles.has(fileId);
+            const isSelected = this.selectedFiles.has(fileId);
+            checkbox.checked = isSelected;
+            
+            // 更新卡片的选中状态
+            const card = checkbox.closest('.file-card');
+            if (card) {
+                if (isSelected) {
+                    Utils.DOM.addClass(card, 'selected');
+                } else {
+                    Utils.DOM.removeClass(card, 'selected');
+                }
+            }
         });
 
         // 更新全选状态
@@ -642,17 +792,60 @@ class FileManager {
      * 更新选择UI
      */
     updateSelectionUI() {
-        const selectedCount = this.selectedFiles.size;
+        const totalSelectedCount = this.selectedFiles.size;
         const selectedCountSpan = Utils.DOM.$('#selected-count');
         const batchDeleteBtn = Utils.DOM.$('#btn-batch-delete');
 
         if (selectedCountSpan) {
-            selectedCountSpan.textContent = selectedCount;
+            selectedCountSpan.textContent = totalSelectedCount;
         }
 
         if (batchDeleteBtn) {
-            batchDeleteBtn.disabled = selectedCount === 0;
+            batchDeleteBtn.disabled = totalSelectedCount === 0;
         }
+    }
+
+    /**
+     * 处理下拉菜单切换
+     */
+    handleDropdownToggle(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        
+        console.log('Dropdown toggle clicked', e.target);
+        
+        const button = e.target.closest('.dropdown-toggle');
+        if (!button) {
+            console.error('Could not find dropdown button');
+            return;
+        }
+        
+        const dropdown = button.closest('.dropdown');
+        if (!dropdown) {
+            console.error('Could not find dropdown container');
+            return;
+        }
+        
+        const isOpen = Utils.DOM.hasClass(dropdown, 'show');
+        
+        console.log('Dropdown state:', { button, dropdown, isOpen });
+        
+        // 关闭所有其他下拉菜单
+        this.closeAllDropdowns();
+        
+        // 切换当前下拉菜单
+        if (!isOpen) {
+            Utils.DOM.addClass(dropdown, 'show');
+            console.log('Opened dropdown', dropdown);
+        }
+    }
+
+    /**
+     * 关闭所有下拉菜单
+     */
+    closeAllDropdowns() {
+        const allDropdowns = Utils.DOM.$$('.dropdown.show');
+        allDropdowns.forEach(dd => Utils.DOM.removeClass(dd, 'show'));
     }
 
     /**
@@ -661,14 +854,8 @@ class FileManager {
     switchViewMode(mode) {
         this.viewMode = mode;
 
-        // 更新按钮状态
-        const viewToggleBtns = Utils.DOM.$$('.view-toggle .btn');
-        viewToggleBtns.forEach(btn => {
-            Utils.DOM.removeClass(btn, 'active');
-            if (btn.dataset.view === mode) {
-                Utils.DOM.addClass(btn, 'active');
-            }
-        });
+        // 应用视图模式样式
+        this.applyViewMode();
 
         // 重新渲染列表
         this.loadFileList();
@@ -681,9 +868,71 @@ class FileManager {
      * 删除单个文件
      */
     async deleteFile(fileId) {
-        const result = confirm('确定要删除这个文件吗？删除后无法恢复。');
-        if (!result) return;
+        try {
+            // 获取文件信息以显示在确认对话框中
+            const fileInfoResponse = await API.FileAPI.getFileInfo(fileId);
+            let fileName = '未知文件';
+            let fileSize = '';
+            
+            if (fileInfoResponse.success) {
+                fileName = fileInfoResponse.data.original_name;
+                fileSize = Utils.StringUtils.formatFileSize(fileInfoResponse.data.file_size);
+            }
 
+            // 显示删除确认模态框
+            this.showDeleteConfirmModal(fileId, fileName, fileSize);
+
+        } catch (error) {
+            console.error('获取文件信息失败:', error);
+            // 如果获取文件信息失败，仍然显示删除确认框但不显示详细信息
+            this.showDeleteConfirmModal(fileId, '未知文件', '');
+        }
+    }
+
+    /**
+     * 显示删除确认模态框
+     */
+    showDeleteConfirmModal(fileId, fileName, fileSize) {
+        // 更新模态框内容
+        const fileInfoElement = Utils.DOM.$('#delete-file-info');
+        if (fileInfoElement) {
+            fileInfoElement.innerHTML = `
+                <div class="file-name">${Utils.StringUtils.escapeHtml(fileName)}</div>
+                ${fileSize ? `<div class="file-size">大小: ${fileSize}</div>` : ''}
+            `;
+        }
+
+        // 显示模态框
+        Utils.Modal.show('#delete-confirm-modal');
+
+        // 绑定确认和取消按钮事件
+        const confirmBtn = Utils.DOM.$('#delete-confirm-btn');
+        const cancelBtn = Utils.DOM.$('#delete-cancel-btn');
+
+        const handleConfirm = async () => {
+            Utils.Modal.hide('#delete-confirm-modal');
+            await this.performDeleteFile(fileId);
+            cleanup();
+        };
+
+        const handleCancel = () => {
+            Utils.Modal.hide('#delete-confirm-modal');
+            cleanup();
+        };
+
+        const cleanup = () => {
+            confirmBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+    }
+
+    /**
+     * 执行删除文件操作
+     */
+    async performDeleteFile(fileId) {
         try {
             Utils.Loading.show('删除文件...');
 
@@ -708,21 +957,78 @@ class FileManager {
      * 批量删除文件
      */
     async batchDeleteFiles() {
-        if (this.selectedFiles.size === 0) return;
+        if (this.selectedFiles.size === 0) {
+            Utils.Notification.warning('请选择文件', '请先选择要删除的文件');
+            return;
+        }
 
-        const result = confirm(`确定要删除选中的 ${this.selectedFiles.size} 个文件吗？删除后无法恢复。`);
-        if (!result) return;
+        // 显示批量删除确认模态框
+        this.showBatchDeleteModal();
+    }
 
+    /**
+     * 显示批量删除确认模态框
+     */
+    showBatchDeleteModal() {
+        const selectedCount = this.selectedFiles.size;
+        
+        // 更新模态框内容
+        const batchCountElement = Utils.DOM.$('#batch-count');
+        if (batchCountElement) {
+            batchCountElement.textContent = selectedCount;
+        }
+
+        // 显示模态框
+        Utils.Modal.show('#batch-delete-modal');
+
+        // 绑定确认和取消按钮事件
+        const confirmBtn = Utils.DOM.$('#batch-confirm-btn');
+        const cancelBtn = Utils.DOM.$('#batch-cancel-btn');
+
+        const handleConfirm = async () => {
+            Utils.Modal.hide('#batch-delete-modal');
+            await this.performBatchDelete();
+            cleanup();
+        };
+
+        const handleCancel = () => {
+            Utils.Modal.hide('#batch-delete-modal');
+            cleanup();
+        };
+
+        const cleanup = () => {
+            confirmBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+    }
+
+    /**
+     * 执行批量删除操作
+     */
+    async performBatchDelete() {
         try {
             Utils.Loading.show('批量删除文件...');
 
-            const fileIds = Array.from(this.selectedFiles);
+            // 过滤有效的文件ID
+            const fileIds = Array.from(this.selectedFiles).filter(id => 
+                id != null && !isNaN(id) && Number.isInteger(id) && id > 0
+            );
+            
+            if (fileIds.length === 0) {
+                Utils.Notification.warning('没有有效的文件', '请选择要删除的文件');
+                return;
+            }
+            
             const response = await API.FileAPI.batchDeleteFiles(fileIds);
 
             if (response.success) {
                 const { success_count, total_count } = response.data;
                 Utils.Notification.success('批量删除完成', `成功删除 ${success_count}/${total_count} 个文件`);
                 this.selectedFiles.clear();
+                this.updateSelectionUI();
                 this.refreshFileList();
             } else {
                 throw new Error(response.message);
@@ -740,13 +1046,119 @@ class FileManager {
      * 重命名文件
      */
     async renameFile(fileId) {
-        const newName = prompt('请输入新的文件名：');
-        if (!newName || !newName.trim()) return;
+        try {
+            // 首先获取当前文件信息，获得当前文件名
+            Utils.Loading.show('获取文件信息...');
+            const fileInfoResponse = await API.FileAPI.getFileInfo(fileId);
+            
+            if (!fileInfoResponse.success) {
+                throw new Error(fileInfoResponse.message);
+            }
+            
+            const fileInfo = fileInfoResponse.data;
+            Utils.Loading.hide();
+            
+            // 显示重命名模态框
+            this.showRenameModal(fileId, fileInfo);
 
+        } catch (error) {
+            console.error('获取文件信息失败:', error);
+            Utils.Notification.error('获取文件信息失败', error.message);
+            Utils.Loading.hide();
+        }
+    }
+
+    /**
+     * 显示重命名模态框
+     */
+    showRenameModal(fileId, fileInfo) {
+        // 获取不带扩展名的文件名
+        const currentFileName = fileInfo.original_name;
+        const fileNameWithoutExt = currentFileName.replace(/\.pdf$/i, '');
+        
+        // 更新模态框内容
+        const renameInput = Utils.DOM.$('#rename-input');
+        const fileInfoElement = Utils.DOM.$('#rename-file-info');
+        
+        if (renameInput) {
+            renameInput.value = fileNameWithoutExt;
+            // 聚焦并选中文本
+            setTimeout(() => {
+                renameInput.focus();
+                renameInput.select();
+            }, 100);
+        }
+        
+        if (fileInfoElement) {
+            fileInfoElement.innerHTML = `
+                <div class="file-name">当前文件名: ${Utils.StringUtils.escapeHtml(currentFileName)}</div>
+                <div class="file-size">文件大小: ${Utils.StringUtils.formatFileSize(fileInfo.file_size)}</div>
+            `;
+        }
+
+        // 显示模态框
+        Utils.Modal.show('#rename-modal');
+
+        // 绑定事件
+        const confirmBtn = Utils.DOM.$('#rename-confirm-btn');
+        const cancelBtn = Utils.DOM.$('#rename-cancel-btn');
+
+        const handleConfirm = async () => {
+            const newName = renameInput ? renameInput.value.trim() : '';
+            if (!newName) {
+                Utils.Notification.warning('输入错误', '文件名不能为空');
+                return;
+            }
+            
+            // 添加.pdf扩展名
+            const newFullName = newName.endsWith('.pdf') ? newName : newName + '.pdf';
+            
+            if (newFullName === currentFileName) {
+                Utils.Modal.hide('#rename-modal');
+                cleanup();
+                return;
+            }
+
+            Utils.Modal.hide('#rename-modal');
+            await this.performRename(fileId, newFullName);
+            cleanup();
+        };
+
+        const handleCancel = () => {
+            Utils.Modal.hide('#rename-modal');
+            cleanup();
+        };
+
+        const handleEnterKey = (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                handleConfirm();
+            }
+        };
+
+        const cleanup = () => {
+            confirmBtn.removeEventListener('click', handleConfirm);
+            cancelBtn.removeEventListener('click', handleCancel);
+            if (renameInput) {
+                renameInput.removeEventListener('keypress', handleEnterKey);
+            }
+        };
+
+        confirmBtn.addEventListener('click', handleConfirm);
+        cancelBtn.addEventListener('click', handleCancel);
+        if (renameInput) {
+            renameInput.addEventListener('keypress', handleEnterKey);
+        }
+    }
+
+    /**
+     * 执行重命名操作
+     */
+    async performRename(fileId, newName) {
         try {
             Utils.Loading.show('重命名文件...');
-
-            const response = await API.FileAPI.renameFile(fileId, newName.trim());
+            const response = await API.FileAPI.renameFile(fileId, newName);
+            
             if (response.success) {
                 Utils.Notification.success('重命名成功', '文件已成功重命名');
                 this.refreshFileList();
@@ -788,19 +1200,70 @@ class FileManager {
      * 显示文件详情模态框
      */
     showFileInfoModal(fileInfo) {
-        // 这里可以创建一个详情模态框
-        const info = `
-            文件名：${fileInfo.original_name}
-            文件大小：${Utils.StringUtils.formatFileSize(fileInfo.file_size)}
-            上传状态：${fileInfo.upload_status}
-            处理状态：${fileInfo.process_status}
-            处理进度：${fileInfo.process_progress}%
-            内容提取：${fileInfo.content_extracted ? '是' : '否'}
-            已建索引：${fileInfo.indexed ? '是' : '否'}
-            上传时间：${Utils.StringUtils.formatTime(fileInfo.created_at)}
+        const statusMap = {
+            'uploaded': '已上传',
+            'processing': '处理中', 
+            'completed': '已完成',
+            'failed': '失败'
+        };
+
+        const content = `
+            <div class="file-detail-item">
+                <label>文件名:</label>
+                <span>${Utils.StringUtils.escapeHtml(fileInfo.original_name)}</span>
+            </div>
+            <div class="file-detail-item">
+                <label>文件大小:</label>
+                <span>${Utils.StringUtils.formatFileSize(fileInfo.file_size)}</span>
+            </div>
+            <div class="file-detail-item">
+                <label>上传状态:</label>
+                <span class="status-badge status-${fileInfo.upload_status}">${statusMap[fileInfo.upload_status] || fileInfo.upload_status}</span>
+            </div>
+            <div class="file-detail-item">
+                <label>处理状态:</label>
+                <span class="status-badge status-${fileInfo.process_status}">${statusMap[fileInfo.process_status] || fileInfo.process_status}</span>
+            </div>
+            <div class="file-detail-item">
+                <label>处理进度:</label>
+                <div class="progress-bar-container">
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: ${fileInfo.process_progress || 0}%"></div>
+                    </div>
+                    <span class="progress-text">${fileInfo.process_progress || 0}%</span>
+                </div>
+            </div>
+            <div class="file-detail-item">
+                <label>内容提取:</label>
+                <span class="feature-status ${fileInfo.content_extracted ? 'enabled' : 'disabled'}">
+                    <i class="fas fa-${fileInfo.content_extracted ? 'check-circle' : 'times-circle'}"></i>
+                    ${fileInfo.content_extracted ? '已完成' : '未完成'}
+                </span>
+            </div>
+            <div class="file-detail-item">
+                <label>建立索引:</label>
+                <span class="feature-status ${fileInfo.indexed ? 'enabled' : 'disabled'}">
+                    <i class="fas fa-${fileInfo.indexed ? 'check-circle' : 'times-circle'}"></i>
+                    ${fileInfo.indexed ? '已建立' : '未建立'}
+                </span>
+            </div>
+            <div class="file-detail-item">
+                <label>上传时间:</label>
+                <span>${Utils.StringUtils.formatTime(fileInfo.created_at)}</span>
+            </div>
+            ${fileInfo.updated_at ? `
+            <div class="file-detail-item">
+                <label>更新时间:</label>
+                <span>${Utils.StringUtils.formatTime(fileInfo.updated_at)}</span>
+            </div>
+            ` : ''}
         `;
 
-        alert(info); // 简化处理，实际项目中应该用自定义模态框
+        const contentContainer = Utils.DOM.$('#file-info-content');
+        if (contentContainer) {
+            contentContainer.innerHTML = content;
+            Utils.Modal.show('#file-info-modal');
+        }
     }
 
     /**

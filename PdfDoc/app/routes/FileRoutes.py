@@ -7,6 +7,7 @@
 
 import asyncio
 import logging
+import time
 from flask import Blueprint, request, jsonify, current_app
 from werkzeug.utils import secure_filename
 from typing import Dict, Any
@@ -61,14 +62,25 @@ def upload_file():
                 'code': 400
             }), 400
             
-        # 安全文件名处理
-        filename = secure_filename(file.filename)
-        if not filename:
+        # 安全文件名处理 - 改进版本，确保保留扩展名
+        original_filename = file.filename
+        import os
+        name, ext = os.path.splitext(original_filename)
+        
+        # 检查是否是PDF文件
+        if ext.lower() != '.pdf':
             return jsonify({
                 'success': False,
-                'message': '文件名无效',
+                'message': '文件必须是PDF格式',
                 'code': 400
             }), 400
+        
+        # 使用secure_filename处理文件名，但确保保留扩展名
+        safe_name = secure_filename(name) if name else f"file_{int(time.time())}"
+        if not safe_name:  # 如果名称被完全清理掉，使用时间戳
+            safe_name = f"file_{int(time.time())}"
+        
+        filename = safe_name + ext
             
         # 读取文件数据
         file_data = file.read()
@@ -79,8 +91,8 @@ def upload_file():
                 'code': 400
             }), 400
             
-        # 调用服务层处理文件上传
-        result = asyncio.run(file_service.upload_file(file_data, filename, user_id))
+        # 调用服务层处理文件上传 - 传递原始文件名和安全文件名
+        result = asyncio.run(file_service.upload_file(file_data, filename, user_id, original_filename))
         
         if result['success']:
             return jsonify({
@@ -248,6 +260,9 @@ def rename_file(file_id: int):
         new_name = data.get('new_name', '').strip()
         user_id = data.get('user_id', 1)
         
+        # 调试日志
+        logger.info(f"重命名请求: file_id={file_id}, new_name='{new_name}', user_id={user_id}")
+        
         # 参数验证
         if not new_name:
             return jsonify({
@@ -265,12 +280,20 @@ def rename_file(file_id: int):
                 'code': 400
             }), 400
             
-        # 文件名安全处理
-        new_name = secure_filename(new_name)
-        if not new_name:
+        # 基本文件名验证（保留中文字符）
+        if not new_name.strip():
             return jsonify({
                 'success': False,
-                'message': '文件名无效',
+                'message': '文件名不能为空',
+                'code': 400
+            }), 400
+            
+        # 检查文件名是否包含危险字符
+        dangerous_chars = ['/', '\\', ':', '*', '?', '"', '<', '>', '|']
+        if any(char in new_name for char in dangerous_chars):
+            return jsonify({
+                'success': False,
+                'message': '文件名包含非法字符',
                 'code': 400
             }), 400
             
@@ -376,6 +399,9 @@ def batch_delete_files():
         file_ids = data.get('file_ids', [])
         user_id = data.get('user_id', 1)
         
+        # 调试日志
+        logger.info(f"批量删除请求: file_ids={file_ids}, user_id={user_id}")
+        
         # 参数验证
         if not file_ids or not isinstance(file_ids, list):
             return jsonify({
@@ -385,12 +411,43 @@ def batch_delete_files():
             }), 400
             
         try:
+            # 验证user_id
+            if user_id is None:
+                user_id = 1  # 默认用户ID
             user_id = int(user_id)
-            file_ids = [int(fid) for fid in file_ids]
-        except ValueError:
+            
+            # 验证并转换文件ID，过滤掉无效值
+            validated_file_ids = []
+            for i, fid in enumerate(file_ids):
+                try:
+                    if fid is not None and str(fid).strip():
+                        file_id = int(fid)
+                        if file_id > 0:  # 确保是正数
+                            validated_file_ids.append(file_id)
+                        else:
+                            logger.warning(f"跳过无效文件ID (非正数): {fid}")
+                    else:
+                        logger.warning(f"跳过空文件ID at index {i}: {fid}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"跳过无效文件ID at index {i}: {fid}, 错误: {e}")
+                    continue
+                    
+            file_ids = validated_file_ids
+            
+            if not file_ids:
+                return jsonify({
+                    'success': False,
+                    'message': '没有有效的文件ID',
+                    'code': 400
+                }), 400
+                
+            logger.info(f"验证后的参数: user_id={user_id}, file_ids={file_ids}")
+                
+        except (ValueError, TypeError) as e:
+            logger.error(f"参数转换错误: {e}")
             return jsonify({
                 'success': False,
-                'message': '参数格式错误',
+                'message': f'参数格式错误: {str(e)}',
                 'code': 400
             }), 400
             
@@ -474,20 +531,8 @@ def search_files():
         if page_size < 1 or page_size > 100:
             page_size = 20
             
-        # 这里应该实现文件搜索逻辑
-        # 简化实现：按文件名搜索
-        result = {
-            'success': True,
-            'data': {
-                'files': [],  # 搜索结果
-                'pagination': {
-                    'total': 0,
-                    'page': page,
-                    'page_size': page_size,
-                    'total_pages': 0
-                }
-            }
-        }
+        # 实现文件搜索逻辑：按文件名搜索
+        result = asyncio.run(file_service.search_files(user_id, keyword, page, page_size))
         
         return jsonify({
             'success': True,

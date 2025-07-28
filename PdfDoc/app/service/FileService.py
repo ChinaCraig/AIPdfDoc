@@ -125,14 +125,15 @@ class FileService:
             self.logger.error(f"数据库连接失败: {e}")
             raise
             
-    async def upload_file(self, file_data: bytes, filename: str, user_id: int) -> Dict[str, Any]:
+    async def upload_file(self, file_data: bytes, filename: str, user_id: int, original_filename: str = None) -> Dict[str, Any]:
         """
         上传文件
         
         Args:
             file_data: 文件二进制数据
-            filename: 原始文件名
+            filename: 安全处理后的文件名
             user_id: 用户ID
+            original_filename: 原始文件名（用于显示）
             
         Returns:
             上传结果信息
@@ -164,17 +165,20 @@ class FileService:
                 }
                 
             # 保存文件到磁盘
-            upload_dir = Path(self.configs.get('config', {}).get('file_storage', {}).get('upload_dir', './uploads'))
-            upload_dir.mkdir(exist_ok=True)
+            file_storage_config = self.configs.get('config', {}).get('file_storage', {})
+            upload_dir = Path(file_storage_config.get('upload_dir', './uploads'))
+            upload_dir.mkdir(parents=True, exist_ok=True)
             file_path = upload_dir / stored_filename
             
             with open(file_path, 'wb') as f:
                 f.write(file_data)
                 
             # 保存文件信息到数据库
+            # 使用原始文件名作为显示名称，如果没有则使用处理后的文件名
+            display_name = original_filename if original_filename else filename
             file_record = await self._save_file_record(
                 user_id=user_id,
-                original_name=filename,
+                original_name=display_name,
                 stored_name=stored_filename,
                 file_path=str(file_path),
                 file_size=len(file_data),
@@ -214,16 +218,17 @@ class FileService:
         try:
             # 检查文件扩展名
             file_extension = Path(filename).suffix.lower()
-            allowed_extensions = self.configs.get('config', {}).get('file_storage', {}).get('allowed_extensions', ['.pdf'])
+            file_storage_config = self.configs.get('config', {}).get('file_storage', {})
+            allowed_extensions = file_storage_config.get('allowed_extensions', ['.pdf'])
             
             if file_extension not in allowed_extensions:
                 return {
                     'valid': False,
-                    'message': f'不支持的文件类型: {file_extension}'
+                    'message': f'不支持的文件类型: {file_extension}，支持的类型: {", ".join(allowed_extensions)}'
                 }
                 
             # 检查文件大小
-            max_size = self.configs.get('config', {}).get('file_storage', {}).get('max_file_size', 100) * 1024 * 1024  # MB转字节
+            max_size = file_storage_config.get('max_file_size', 100) * 1024 * 1024  # MB转字节
             if len(file_data) > max_size:
                 return {
                     'valid': False,
@@ -310,9 +315,14 @@ class FileService:
             connection = self.get_db_connection()
             
             with connection.cursor() as cursor:
+                # 获取文件的用户ID
+                cursor.execute("SELECT user_id FROM files WHERE id = %s", (file_id,))
+                file_info = cursor.fetchone()
+                user_id = file_info['user_id'] if file_info else None
+                
                 sql = """
-                INSERT INTO task_queue (task_type, task_id, file_id, task_status, task_params)
-                VALUES ('file_process', %s, %s, 'pending', %s)
+                INSERT INTO task_queue (task_type, task_id, file_id, user_id, task_status, task_params)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 """
                 task_params = {
                     'file_id': file_id,
@@ -321,7 +331,7 @@ class FileService:
                     'extract_tables': True,
                     'build_index': True
                 }
-                cursor.execute(sql, ('file_process', task_id, file_id, json.dumps(task_params)))
+                cursor.execute(sql, ('file_process', task_id, file_id, user_id, 'pending', json.dumps(task_params)))
                 
             connection.close()
             
@@ -688,7 +698,24 @@ class FileService:
                 LIMIT %s OFFSET %s
                 """
                 cursor.execute(list_sql, (user_id, page_size, offset))
-                files = cursor.fetchall()
+                raw_files = cursor.fetchall()
+                
+                # 格式化文件数据
+                files = []
+                for file_info in raw_files:
+                    formatted_file = {
+                        'id': file_info['id'],
+                        'original_name': file_info['original_name'],
+                        'file_size': file_info['file_size'],
+                        'upload_status': file_info['upload_status'],
+                        'process_status': file_info['process_status'],
+                        'process_progress': file_info['process_progress'],
+                        'content_extracted': bool(file_info['content_extracted']),
+                        'indexed': bool(file_info['indexed']),
+                        'created_at': file_info['created_at'].isoformat() if file_info['created_at'] else None,
+                        'updated_at': file_info['updated_at'].isoformat() if file_info['updated_at'] else None
+                    }
+                    files.append(formatted_file)
                 
             connection.close()
             
@@ -712,6 +739,74 @@ class FileService:
                 'message': f'获取文件列表失败: {str(e)}',
                 'data': None
             }
+    
+    async def search_files(self, user_id: int, keyword: str, page: int = 1, page_size: int = 20) -> Dict[str, Any]:
+        """搜索文件"""
+        try:
+            offset = (page - 1) * page_size
+            search_pattern = f"%{keyword}%"
+            
+            connection = self.get_db_connection()
+            with connection.cursor() as cursor:
+                # 获取搜索结果总数
+                count_sql = """
+                SELECT COUNT(*) as total FROM files 
+                WHERE user_id = %s AND original_name LIKE %s
+                """
+                cursor.execute(count_sql, (user_id, search_pattern))
+                total = cursor.fetchone()['total']
+                
+                # 获取搜索结果列表
+                search_sql = """
+                SELECT id, original_name, file_size, upload_status, process_status, 
+                       process_progress, content_extracted, indexed, created_at, updated_at
+                FROM files 
+                WHERE user_id = %s AND original_name LIKE %s
+                ORDER BY created_at DESC 
+                LIMIT %s OFFSET %s
+                """
+                cursor.execute(search_sql, (user_id, search_pattern, page_size, offset))
+                raw_files = cursor.fetchall()
+                
+                # 格式化文件数据
+                files = []
+                for file_info in raw_files:
+                    formatted_file = {
+                        'id': file_info['id'],
+                        'original_name': file_info['original_name'],
+                        'file_size': file_info['file_size'],
+                        'upload_status': file_info['upload_status'],
+                        'process_status': file_info['process_status'],
+                        'process_progress': file_info['process_progress'],
+                        'content_extracted': bool(file_info['content_extracted']),
+                        'indexed': bool(file_info['indexed']),
+                        'created_at': file_info['created_at'].isoformat() if file_info['created_at'] else None,
+                        'updated_at': file_info['updated_at'].isoformat() if file_info['updated_at'] else None
+                    }
+                    files.append(formatted_file)
+                
+            connection.close()
+            
+            return {
+                'success': True,
+                'data': {
+                    'files': files,
+                    'pagination': {
+                        'total': total,
+                        'page': page,
+                        'page_size': page_size,
+                        'total_pages': (total + page_size - 1) // page_size
+                    }
+                }
+            }
+            
+        except Exception as e:
+            self.logger.error(f"搜索文件失败: {e}")
+            return {
+                'success': False,
+                'message': f'搜索文件失败: {str(e)}',
+                'data': None
+            }
             
     async def delete_file(self, file_id: int, user_id: int) -> Dict[str, Any]:
         """删除文件"""
@@ -730,18 +825,30 @@ class FileService:
                     'message': '无权限删除此文件'
                 }
                 
-            # 删除物理文件
-            file_path = Path(file_info['file_path'])
-            if file_path.exists():
-                file_path.unlink()
-                
             # 删除数据库记录（触发器会自动清理相关数据）
             connection = self.get_db_connection()
             with connection.cursor() as cursor:
-                sql = "DELETE FROM files WHERE id = %s"
-                cursor.execute(sql, (file_id,))
+                sql = "DELETE FROM files WHERE id = %s AND user_id = %s"
+                cursor.execute(sql, (file_id, user_id))
+                affected_rows = cursor.rowcount
+                
+                if affected_rows == 0:
+                    connection.close()
+                    return {
+                        'success': False,
+                        'message': '文件删除失败，可能已被删除或无权限'
+                    }
                 
             connection.close()
+            
+            # 删除物理文件
+            try:
+                file_path = Path(file_info['file_path'])
+                if file_path.exists():
+                    file_path.unlink()
+                    self.logger.info(f"物理文件删除成功: {file_path}")
+            except Exception as e:
+                self.logger.warning(f"物理文件删除失败: {e}，但数据库记录已删除")
             
             self.logger.info(f"文件删除成功: file_id={file_id}")
             return {
@@ -776,8 +883,16 @@ class FileService:
             # 更新文件名
             connection = self.get_db_connection()
             with connection.cursor() as cursor:
-                sql = "UPDATE files SET original_name = %s, updated_at = %s WHERE id = %s"
-                cursor.execute(sql, (new_name, datetime.now(), file_id))
+                sql = "UPDATE files SET original_name = %s, updated_at = %s WHERE id = %s AND user_id = %s"
+                cursor.execute(sql, (new_name, datetime.now(), file_id, user_id))
+                affected_rows = cursor.rowcount
+                
+                if affected_rows == 0:
+                    connection.close()
+                    return {
+                        'success': False,
+                        'message': '文件重命名失败，可能文件不存在或无权限'
+                    }
                 
             connection.close()
             

@@ -315,6 +315,95 @@
         </div>
     </div>
 
+    <!-- 文件详情模态框 -->
+    <div class="modal" id="file-info-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>文件详情</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="file-info-content" id="file-info-content">
+                    <!-- 文件详情内容将动态填充 -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 删除确认模态框 -->
+    <div class="modal" id="delete-confirm-modal">
+        <div class="modal-content modal-confirm">
+            <div class="modal-header">
+                <h3>确认删除</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="confirm-icon">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <div class="confirm-message">
+                    <p id="delete-confirm-message">确定要删除这个文件吗？删除后无法恢复。</p>
+                    <div class="file-info" id="delete-file-info">
+                        <!-- 文件信息将动态填充 -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="delete-cancel-btn">取消</button>
+                <button class="btn btn-danger" id="delete-confirm-btn">删除</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 批量删除确认模态框 -->
+    <div class="modal" id="batch-delete-modal">
+        <div class="modal-content modal-confirm">
+            <div class="modal-header">
+                <h3>批量删除确认</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="confirm-icon">
+                    <i class="fas fa-exclamation-triangle"></i>
+                </div>
+                <div class="confirm-message">
+                    <p id="batch-delete-message">确定要删除选中的文件吗？删除后无法恢复。</p>
+                    <div class="batch-info">
+                        <span class="selected-count-text">已选择 <strong id="batch-count">0</strong> 个文件</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="batch-cancel-btn">取消</button>
+                <button class="btn btn-danger" id="batch-confirm-btn">删除全部</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 重命名模态框 -->
+    <div class="modal" id="rename-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>重命名文件</h3>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label for="rename-input">文件名:</label>
+                    <input type="text" id="rename-input" class="form-input" placeholder="请输入新的文件名">
+                    <div class="input-hint">请输入文件名（无需包含.pdf扩展名）</div>
+                </div>
+                <div class="file-info" id="rename-file-info">
+                    <!-- 当前文件信息将动态填充 -->
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="rename-cancel-btn">取消</button>
+                <button class="btn btn-primary" id="rename-confirm-btn">确认重命名</button>
+            </div>
+        </div>
+    </div>
+
     <!-- 加载指示器 -->
     <div class="loading-overlay" id="loading-overlay">
         <div class="loading-spinner">

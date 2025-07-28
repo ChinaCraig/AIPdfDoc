@@ -328,7 +328,8 @@ const EventUtils = {
      */
     delegate(container, selector, event, handler) {
         container.addEventListener(event, (e) => {
-            if (e.target.matches(selector)) {
+            const target = e.target.closest(selector);
+            if (target) {
                 handler(e);
             }
         });
@@ -423,7 +424,21 @@ const Validator = {
      * 验证文件类型
      */
     isValidFileType(file, allowedTypes) {
-        return allowedTypes.includes(file.type);
+        // 检查MIME类型
+        if (allowedTypes.includes(file.type)) {
+            return true;
+        }
+        
+        // 如果MIME类型检查失败，检查文件扩展名（作为备用）
+        const fileName = file.name || '';
+        const fileExtension = fileName.toLowerCase().split('.').pop();
+        
+        // PDF文件的扩展名检查
+        if (allowedTypes.includes('application/pdf') && fileExtension === 'pdf') {
+            return true;
+        }
+        
+        return false;
     },
 
     /**

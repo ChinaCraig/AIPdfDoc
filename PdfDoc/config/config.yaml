@@ -16,7 +16,7 @@ file_storage:
   # 临时文件目录
   temp_dir: ./temp
   # 支持的文件类型
-  allowed_extensions: [pdf]
+  allowed_extensions: [".pdf"]
   # 最大文件大小（MB）
   max_file_size: 100
   # 文件名编码
