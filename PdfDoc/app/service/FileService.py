@@ -95,13 +95,33 @@ class FileService:
             ocr_config = self.configs.get('model', {}).get('ocr_model', {})
             gpu_enabled = self.configs.get('model', {}).get('global_gpu_acceleration', False)
             
-            self.ocr_engine = paddleocr.PaddleOCR(
-                use_angle_cls=ocr_config.get('use_angle_cls', True),
-                lang=ocr_config.get('lang', 'ch'),
-                use_gpu=gpu_enabled,
-                show_log=False
-            )
-            self.logger.info("OCR引擎初始化成功")
+            # 根据PaddleOCR版本适配参数
+            try:
+                # 尝试使用新版本参数
+                self.ocr_engine = paddleocr.PaddleOCR(
+                    use_angle_cls=ocr_config.get('use_angle_cls', True),
+                    lang=ocr_config.get('lang', 'ch'),
+                    use_gpu=gpu_enabled
+                )
+                self.logger.info("OCR引擎初始化成功")
+            except Exception as gpu_error:
+                if "Unknown argument: use_gpu" in str(gpu_error):
+                    # 降级处理：不使用use_gpu参数
+                    self.ocr_engine = paddleocr.PaddleOCR(
+                        use_angle_cls=ocr_config.get('use_angle_cls', True),
+                        lang=ocr_config.get('lang', 'ch')
+                    )
+                    self.logger.info("OCR引擎初始化成功 (降级模式，不支持use_gpu参数)")
+                elif "Unknown argument: show_log" in str(gpu_error):
+                    # 降级处理：不使用show_log参数
+                    self.ocr_engine = paddleocr.PaddleOCR(
+                        use_angle_cls=ocr_config.get('use_angle_cls', True),
+                        lang=ocr_config.get('lang', 'ch'),
+                        use_gpu=gpu_enabled
+                    )
+                    self.logger.info("OCR引擎初始化成功 (降级模式，不支持show_log参数)")
+                else:
+                    raise gpu_error
             
         except Exception as e:
             self.logger.error(f"OCR引擎初始化失败: {e}")
@@ -340,8 +360,27 @@ class FileService:
                 # 这里应该调用Celery任务
                 pass
             else:
-                # 直接在后台处理
-                asyncio.create_task(self.process_file(file_id, task_id))
+                # 使用线程池在后台处理，避免阻塞主线程
+                import threading
+                import concurrent.futures
+                
+                def run_async_processing():
+                    """在新的事件循环中运行异步处理"""
+                    try:
+                        # 创建新的事件循环
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        
+                        # 运行文件处理
+                        loop.run_until_complete(self.process_file(file_id, task_id))
+                    except Exception as e:
+                        self.logger.error(f"后台文件处理失败: {e}")
+                    finally:
+                        loop.close()
+                
+                # 在后台线程中启动处理
+                thread = threading.Thread(target=run_async_processing, daemon=True)
+                thread.start()
                 
             self.logger.info(f"文件处理任务已启动: file_id={file_id}, task_id={task_id}")
             
@@ -368,14 +407,18 @@ class FileService:
             total_pages = doc.page_count
             
             # 处理每一页
+            total_content_items = 0
             for page_num in range(total_pages):
                 try:
-                    await self._process_page(doc, page_num, file_id)
+                    page_content_count = await self._process_page(doc, page_num, file_id)
+                    total_content_items += page_content_count
                     
-                    # 更新进度
-                    progress = int((page_num + 1) * 100 / total_pages)
+                    # 更新进度 (80%用于页面处理)
+                    progress = int((page_num + 1) * 80 / total_pages)
                     await self._update_task_status(task_id, 'running', progress)
                     await self._update_file_status(file_id, 'processing', progress)
+                    
+                    self.logger.info(f"页面 {page_num + 1}/{total_pages} 处理完成，提取内容项: {page_content_count}")
                     
                 except Exception as e:
                     self.logger.error(f"处理第{page_num + 1}页失败: {e}")
@@ -383,10 +426,21 @@ class FileService:
                     
             doc.close()
             
-            # 生成文档摘要
+            # 标记内容提取完成
+            if total_content_items > 0:
+                await self._update_file_status(file_id, 'processing', 85, content_extracted=True)
+                self.logger.info(f"文件内容提取完成，共提取 {total_content_items} 个内容项")
+            else:
+                self.logger.warning(f"文件未提取到任何内容: file_id={file_id}")
+            
+            # 生成文档摘要 (90%)
+            await self._update_task_status(task_id, 'running', 90)
+            await self._update_file_status(file_id, 'processing', 90)
             await self._generate_document_summary(file_id)
             
-            # 构建索引
+            # 构建索引 (95%)
+            await self._update_task_status(task_id, 'running', 95)
+            await self._update_file_status(file_id, 'processing', 95)
             await self._build_document_index(file_id)
             
             # 完成处理
@@ -400,9 +454,10 @@ class FileService:
             await self._update_task_status(task_id, 'failed', 0, str(e))
             await self._update_file_status(file_id, 'failed', 0)
             
-    async def _process_page(self, doc, page_num: int, file_id: int):
-        """处理单页内容"""
+    async def _process_page(self, doc, page_num: int, file_id: int) -> int:
+        """处理单页内容，返回提取的内容项数量"""
         page = doc[page_num]
+        content_count = 0
         
         # 提取文本
         text_content = page.get_text()
@@ -412,8 +467,13 @@ class FileService:
                 content_type='text',
                 page_number=page_num + 1,
                 content_text=text_content,
-                content_metadata={'text_length': len(text_content)}
+                content_metadata={
+                    'text_length': len(text_content),
+                    'word_count': len(text_content.split()),
+                    'char_count': len(text_content)
+                }
             )
+            content_count += 1
             
         # 提取图片
         image_list = page.get_images()
@@ -440,7 +500,8 @@ class FileService:
                                 ocr_text = "\n".join([line[1][0] for line in result[0] if line])
                                 
                         except Exception as e:
-                            self.logger.error(f"OCR处理失败: {e}")
+                            error_msg = str(e) if e else f"{type(e).__name__}: 未知OCR错误"
+                            self.logger.error(f"OCR处理失败: {error_msg}")
                             
                     # 保存图片内容信息
                     await self._save_content(
@@ -452,9 +513,12 @@ class FileService:
                             'image_index': img_index,
                             'width': pix.width,
                             'height': pix.height,
-                            'has_ocr_text': bool(ocr_text)
+                            'has_ocr_text': bool(ocr_text),
+                            'ocr_confidence': self._calculate_ocr_confidence(ocr_text),
+                            'image_type': 'embedded'
                         }
                     )
+                    content_count += 1
                     
                 pix = None
                 
@@ -482,13 +546,18 @@ class FileService:
                             'table_index': table_index,
                             'rows': len(table_data),
                             'cols': len(table_data[0]) if table_data else 0,
-                            'bbox': table.bbox
+                            'bbox': table.bbox,
+                            'table_structure': self._analyze_table_structure(table_data),
+                            'has_header': self._detect_table_header(table_data)
                         }
                     )
+                    content_count += 1
                     
             except Exception as e:
                 self.logger.error(f"处理表格失败: {e}")
                 continue
+                
+        return content_count
                 
     def _table_to_text(self, table_data: List[List[str]]) -> str:
         """将表格数据转换为文本"""
@@ -503,6 +572,86 @@ class FileService:
             text_lines.append("\t".join(cleaned_row))
             
         return "\n".join(text_lines)
+        
+    def _calculate_ocr_confidence(self, ocr_text: str) -> float:
+        """计算OCR文本的置信度（简单实现）"""
+        if not ocr_text:
+            return 0.0
+        
+        # 基于文本特征计算置信度
+        chinese_chars = sum(1 for char in ocr_text if '\u4e00' <= char <= '\u9fff')
+        total_chars = len(ocr_text.replace(' ', '').replace('\n', ''))
+        
+        if total_chars == 0:
+            return 0.0
+            
+        # 中文字符比例越高，置信度越高
+        chinese_ratio = chinese_chars / total_chars
+        
+        # 文本长度因子（太短的文本置信度较低）
+        length_factor = min(1.0, total_chars / 10)
+        
+        # 综合置信度
+        confidence = (chinese_ratio * 0.7 + length_factor * 0.3)
+        return round(confidence, 2)
+        
+    def _analyze_table_structure(self, table_data: List[List[str]]) -> Dict[str, Any]:
+        """分析表格结构"""
+        if not table_data:
+            return {}
+            
+        structure = {
+            'row_count': len(table_data),
+            'col_count': len(table_data[0]) if table_data else 0,
+            'empty_cells': 0,
+            'numeric_cols': [],
+            'text_cols': []
+        }
+        
+        # 分析每列的数据类型
+        if table_data and len(table_data) > 1:  # 至少有标题行和数据行
+            for col_idx in range(structure['col_count']):
+                numeric_count = 0
+                text_count = 0
+                
+                for row_idx in range(1, len(table_data)):  # 跳过标题行
+                    if col_idx < len(table_data[row_idx]):
+                        cell_value = str(table_data[row_idx][col_idx]).strip()
+                        if not cell_value:
+                            structure['empty_cells'] += 1
+                        elif cell_value.replace('.', '').replace('-', '').isdigit():
+                            numeric_count += 1
+                        else:
+                            text_count += 1
+                
+                if numeric_count > text_count:
+                    structure['numeric_cols'].append(col_idx)
+                else:
+                    structure['text_cols'].append(col_idx)
+        
+        return structure
+        
+    def _detect_table_header(self, table_data: List[List[str]]) -> bool:
+        """检测表格是否有标题行"""
+        if not table_data or len(table_data) < 2:
+            return False
+            
+        # 简单启发式：第一行文本较短且不包含大量数字
+        first_row = table_data[0]
+        if not first_row:
+            return False
+            
+        # 检查第一行是否像标题
+        for cell in first_row:
+            cell_str = str(cell).strip()
+            if len(cell_str) > 20:  # 标题通常较短
+                return False
+            # 如果第一行包含大量数字，可能不是标题
+            digit_count = sum(1 for char in cell_str if char.isdigit())
+            if digit_count > len(cell_str) * 0.5:
+                return False
+                
+        return True
         
     async def _save_content(self, file_id: int, content_type: str, page_number: int, 
                           content_text: str = "", content_metadata: Dict = None):
@@ -526,39 +675,82 @@ class FileService:
             self.logger.error(f"保存内容失败: {e}")
             
     async def _generate_document_summary(self, file_id: int):
-        """生成文档摘要"""
+        """生成文档摘要和结构化信息，为GraphRAG准备"""
         try:
-            # 获取所有文本内容
             connection = self.get_db_connection()
+            
+            # 获取所有内容统计
+            content_stats = await self._get_content_statistics(file_id, connection)
+            
+            # 获取所有文本内容
             with connection.cursor() as cursor:
                 sql = """
-                SELECT content_text FROM document_contents 
-                WHERE file_id = %s AND content_type = 'text'
-                ORDER BY page_number
+                SELECT page_number, content_text, content_metadata FROM document_contents 
+                WHERE file_id = %s AND content_type IN ('text', 'table', 'image')
+                ORDER BY page_number, content_type
                 """
                 cursor.execute(sql, (file_id,))
-                results = cursor.fetchall()
+                all_contents = cursor.fetchall()
+            
+            # 按类型组织内容
+            text_contents = []
+            table_contents = []
+            image_contents = []
+            
+            for content in all_contents:
+                metadata = json.loads(content['content_metadata']) if content['content_metadata'] else {}
+                content_item = {
+                    'page': content['page_number'],
+                    'text': content['content_text'],
+                    'metadata': metadata
+                }
                 
-            # 合并文本
-            full_text = "\n".join([row['content_text'] for row in results if row['content_text']])
+                if 'text_length' in metadata:  # 文本内容
+                    text_contents.append(content_item)
+                elif 'table_index' in metadata:  # 表格内容
+                    table_contents.append(content_item)
+                elif 'image_index' in metadata:  # 图片内容
+                    image_contents.append(content_item)
+            
+            # 生成综合摘要
+            full_text = "\n".join([item['text'] for item in text_contents if item['text']])
             
             if full_text:
-                # 生成简单摘要（前500字）
-                summary = full_text[:500] + "..." if len(full_text) > 500 else full_text
+                # 生成多层次摘要
+                summary_short = full_text[:200] + "..." if len(full_text) > 200 else full_text
+                summary_medium = full_text[:500] + "..." if len(full_text) > 500 else full_text
+                summary_long = full_text[:1000] + "..." if len(full_text) > 1000 else full_text
                 
-                # 提取关键词（简单实现）
-                keywords = self._extract_keywords(full_text)
+                # 提取关键词和实体
+                keywords = self._extract_keywords(full_text, max_keywords=20)
+                entities = self._extract_entities(full_text)
                 
-                # 保存摘要
+                # 分析文档结构
+                doc_structure = self._analyze_document_structure(text_contents, table_contents, image_contents)
+                
+                # 保存不同类型的摘要
+                summaries = [
+                    ('short', summary_short),
+                    ('medium', summary_medium), 
+                    ('long', summary_long),
+                    ('statistics', json.dumps(content_stats)),
+                    ('structure', json.dumps(doc_structure))
+                ]
+                
                 with connection.cursor() as cursor:
-                    sql = """
-                    INSERT INTO document_summaries 
-                    (file_id, summary_type, summary_content, keywords)
-                    VALUES (%s, 'full', %s, %s)
-                    """
-                    cursor.execute(sql, (file_id, summary, json.dumps(keywords)))
-                    
+                    for summary_type, summary_content in summaries:
+                        sql = """
+                        INSERT INTO document_summaries 
+                        (file_id, summary_type, summary_content, keywords, entities, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s)
+                        """
+                        cursor.execute(sql, (
+                            file_id, summary_type, summary_content, 
+                            json.dumps(keywords), json.dumps(entities), datetime.now()
+                        ))
+            
             connection.close()
+            self.logger.info(f"文档摘要生成完成: file_id={file_id}")
             
         except Exception as e:
             self.logger.error(f"生成文档摘要失败: {e}")
@@ -587,6 +779,138 @@ class FileService:
         except Exception as e:
             self.logger.error(f"提取关键词失败: {e}")
             return []
+    
+    async def _get_content_statistics(self, file_id: int, connection) -> Dict[str, Any]:
+        """获取内容统计信息"""
+        try:
+            with connection.cursor() as cursor:
+                # 统计各类型内容数量
+                sql = """
+                SELECT 
+                    content_type,
+                    COUNT(*) as count,
+                    AVG(CHAR_LENGTH(content_text)) as avg_length,
+                    SUM(CHAR_LENGTH(content_text)) as total_length
+                FROM document_contents 
+                WHERE file_id = %s 
+                GROUP BY content_type
+                """
+                cursor.execute(sql, (file_id,))
+                stats = cursor.fetchall()
+                
+                result = {
+                    'total_pages': 0,
+                    'content_types': {},
+                    'total_content_length': 0
+                }
+                
+                for stat in stats:
+                    content_type = stat['content_type']
+                    result['content_types'][content_type] = {
+                        'count': stat['count'],
+                        'avg_length': round(stat['avg_length'] or 0, 2),
+                        'total_length': stat['total_length'] or 0
+                    }
+                    result['total_content_length'] += stat['total_length'] or 0
+                
+                # 获取页面数
+                cursor.execute("SELECT MAX(page_number) as max_page FROM document_contents WHERE file_id = %s", (file_id,))
+                page_result = cursor.fetchone()
+                result['total_pages'] = page_result['max_page'] or 0
+                
+                return result
+                
+        except Exception as e:
+            self.logger.error(f"获取内容统计失败: {e}")
+            return {}
+    
+    def _extract_entities(self, text: str) -> List[Dict[str, Any]]:
+        """提取命名实体（简单实现）"""
+        try:
+            entities = []
+            
+            # 简单的实体识别模式
+            import re
+            
+            # 日期模式
+            date_pattern = r'\d{4}[年\-/]\d{1,2}[月\-/]\d{1,2}[日]?'
+            dates = re.findall(date_pattern, text)
+            for date in set(dates):
+                entities.append({'type': 'date', 'value': date, 'confidence': 0.8})
+            
+            # 数字模式（可能是金额、数量等）
+            number_pattern = r'\d+(?:\.\d+)?(?:[万千百十]|[元件个条])'
+            numbers = re.findall(number_pattern, text)
+            for number in set(numbers):
+                entities.append({'type': 'quantity', 'value': number, 'confidence': 0.7})
+            
+            # 邮箱模式
+            email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+            emails = re.findall(email_pattern, text)
+            for email in set(emails):
+                entities.append({'type': 'email', 'value': email, 'confidence': 0.9})
+            
+            return entities[:20]  # 限制返回数量
+            
+        except Exception as e:
+            self.logger.error(f"提取实体失败: {e}")
+            return []
+    
+    def _analyze_document_structure(self, text_contents: List, table_contents: List, image_contents: List) -> Dict[str, Any]:
+        """分析文档结构"""
+        try:
+            structure = {
+                'content_distribution': {
+                    'text_pages': len(set(item['page'] for item in text_contents)),
+                    'table_pages': len(set(item['page'] for item in table_contents)),
+                    'image_pages': len(set(item['page'] for item in image_contents))
+                },
+                'content_density': {},
+                'page_analysis': {}
+            }
+            
+            # 分析每页内容密度
+            all_pages = set()
+            all_pages.update(item['page'] for item in text_contents)
+            all_pages.update(item['page'] for item in table_contents)
+            all_pages.update(item['page'] for item in image_contents)
+            
+            for page_num in all_pages:
+                page_text_count = len([item for item in text_contents if item['page'] == page_num])
+                page_table_count = len([item for item in table_contents if item['page'] == page_num])
+                page_image_count = len([item for item in image_contents if item['page'] == page_num])
+                
+                page_info = {
+                    'text_items': page_text_count,
+                    'table_items': page_table_count,
+                    'image_items': page_image_count,
+                    'total_items': page_text_count + page_table_count + page_image_count
+                }
+                
+                # 页面类型分类
+                if page_table_count > 0 and page_table_count >= page_text_count:
+                    page_info['type'] = 'table_heavy'
+                elif page_image_count > 0 and page_image_count >= page_text_count:
+                    page_info['type'] = 'image_heavy'
+                else:
+                    page_info['type'] = 'text_heavy'
+                
+                structure['page_analysis'][f'page_{page_num}'] = page_info
+            
+            # 计算内容密度
+            total_pages = len(all_pages)
+            if total_pages > 0:
+                structure['content_density'] = {
+                    'avg_text_per_page': len(text_contents) / total_pages,
+                    'avg_tables_per_page': len(table_contents) / total_pages,
+                    'avg_images_per_page': len(image_contents) / total_pages
+                }
+            
+            return structure
+            
+        except Exception as e:
+            self.logger.error(f"分析文档结构失败: {e}")
+            return {}
             
     async def _build_document_index(self, file_id: int):
         """构建文档索引"""
@@ -630,17 +954,25 @@ class FileService:
         except Exception as e:
             self.logger.error(f"更新任务状态失败: {e}")
             
-    async def _update_file_status(self, file_id: int, status: str, progress: int):
+    async def _update_file_status(self, file_id: int, status: str, progress: int, content_extracted: bool = None):
         """更新文件状态"""
         try:
             connection = self.get_db_connection()
             with connection.cursor() as cursor:
-                sql = """
-                UPDATE files 
-                SET process_status = %s, process_progress = %s, updated_at = %s
-                WHERE id = %s
-                """
-                cursor.execute(sql, (status, progress, datetime.now(), file_id))
+                if content_extracted is not None:
+                    sql = """
+                    UPDATE files 
+                    SET process_status = %s, process_progress = %s, content_extracted = %s, updated_at = %s
+                    WHERE id = %s
+                    """
+                    cursor.execute(sql, (status, progress, content_extracted, datetime.now(), file_id))
+                else:
+                    sql = """
+                    UPDATE files 
+                    SET process_status = %s, process_progress = %s, updated_at = %s
+                    WHERE id = %s
+                    """
+                    cursor.execute(sql, (status, progress, datetime.now(), file_id))
                 
             connection.close()
             

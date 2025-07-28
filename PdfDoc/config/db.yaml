@@ -1,9 +1,9 @@
 # MySQL数据库配置
 mysql:
-  host: 192.168.16.26
+  host: 192.168.2.100
   port: 3306
   username: root
-  password: "!200808Xx"
+  password: zhang
   database: pdf_ai_doc
   charset: utf8mb4
   
@@ -15,21 +15,21 @@ connection_pool:
 
 # Redis缓存数据库配置
 redis:
-  host: 192.168.16.26
+  host: 192.168.2.100
   port: 6379
-  password: "!200808Xx"
+  password: zhang
   db: 0
   
 # 向量数据库Milvus配置
 milvus:
-  host: 192.168.16.26
+  host: 192.168.2.100
   port: 19530
   database: pdf_ai_doc
   collection: pdf_doc
   
 # 图数据库Neo4j配置
 neo4j:
-  uri: bolt://192.168.16.26:7687
+  uri: bolt://192.168.2.100:7687
   username: neo4j
-  password: "!200808Xx"
+  password: zhang123456
   database: neo4j 

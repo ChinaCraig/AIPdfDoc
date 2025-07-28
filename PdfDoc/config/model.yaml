@@ -43,7 +43,7 @@ ocr_model:
   cls_model_dir: ./models/ocr/cls
   use_angle_cls: true
   lang: ch
-  use_gpu: false  # 根据global_gpu_acceleration自动调整
+  # use_gpu参数已弃用，现在由global_gpu_acceleration统一控制
   
   # 表格识别模型
   table_model_dir: ./models/ocr/table
