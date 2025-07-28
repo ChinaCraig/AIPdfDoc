@@ -679,7 +679,10 @@ body {
 }
 
 .file-card-actions .dropdown.show .dropdown-menu {
-    display: block;
+    display: block !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    transform: translateY(0) !important;
     animation: dropdownSlideIn 0.2s ease-out;
 }
 
@@ -859,6 +862,49 @@ body {
 
 .file-card.selected .file-card-header {
     background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+}
+
+/* 下拉菜单改进 */
+.file-card-actions .dropdown-menu {
+    white-space: nowrap;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+    border: 1px solid #e2e8f0;
+    backdrop-filter: blur(10px);
+}
+
+.file-card-actions .dropdown-item {
+    transition: all 0.2s ease;
+    border-radius: 4px;
+    margin: 2px 4px;
+    font-weight: 500;
+}
+
+.file-card-actions .dropdown-item:hover {
+    background: #f1f5f9;
+    transform: translateX(2px);
+}
+
+.file-card-actions .dropdown-item.btn-delete-file:hover {
+    background: #fef2f2;
+    color: #dc2626;
+}
+
+/* 卡片视图响应式改进 */
+@media (max-width: 768px) {
+    .file-list.grid-view {
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 16px;
+        padding: 16px;
+    }
+    
+    .file-card-actions .dropdown-menu {
+        min-width: 140px;
+        right: -8px;
+    }
+    
+    .file-card-checkbox {
+        opacity: 1; /* 在移动设备上始终显示复选框 */
+    }
 }
 
 /* 文件详情模态框样式 */

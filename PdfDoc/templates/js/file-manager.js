@@ -836,6 +836,8 @@ class FileManager {
         // 切换当前下拉菜单
         if (!isOpen) {
             Utils.DOM.addClass(dropdown, 'show');
+            // 确保菜单在页面范围内显示
+            this.adjustDropdownPosition(dropdown);
             console.log('Opened dropdown', dropdown);
         }
     }
@@ -845,7 +847,50 @@ class FileManager {
      */
     closeAllDropdowns() {
         const allDropdowns = Utils.DOM.$$('.dropdown.show');
-        allDropdowns.forEach(dd => Utils.DOM.removeClass(dd, 'show'));
+        allDropdowns.forEach(dd => {
+            Utils.DOM.removeClass(dd, 'show');
+            // 清除位置调整
+            const menu = dd.querySelector('.dropdown-menu');
+            if (menu) {
+                menu.style.left = '';
+                menu.style.right = '';
+                menu.style.top = '';
+            }
+        });
+    }
+
+    /**
+     * 调整下拉菜单位置，确保在视窗内显示
+     */
+    adjustDropdownPosition(dropdown) {
+        const menu = dropdown.querySelector('.dropdown-menu');
+        if (!menu) return;
+
+        // 重置样式
+        menu.style.left = '';
+        menu.style.right = '';
+        menu.style.top = '';
+
+        // 等待DOM更新后计算位置
+        setTimeout(() => {
+            const rect = menu.getBoundingClientRect();
+            const viewportWidth = window.innerWidth;
+            const viewportHeight = window.innerHeight;
+
+            // 检查是否超出右边界
+            if (rect.right > viewportWidth) {
+                menu.style.right = '0';
+                menu.style.left = 'auto';
+            }
+
+            // 检查是否超出底部边界
+            if (rect.bottom > viewportHeight) {
+                menu.style.top = 'auto';
+                menu.style.bottom = '100%';
+                menu.style.marginTop = '0';
+                menu.style.marginBottom = '4px';
+            }
+        }, 10);
     }
 
     /**
@@ -862,6 +907,47 @@ class FileManager {
 
         // 保存视图模式
         Utils.Storage.set('file_view_mode', mode);
+        
+        // 调试信息
+        console.log(`视图模式已切换到: ${mode}`);
+        
+        // 确保在网格视图下正确初始化下拉菜单
+        if (mode === 'grid') {
+            setTimeout(() => {
+                this.initializeGridDropdowns();
+            }, 100);
+        }
+    }
+    
+    /**
+     * 初始化网格视图的下拉菜单
+     */
+    initializeGridDropdowns() {
+        const dropdowns = Utils.DOM.$$('.file-card .dropdown');
+        console.log(`找到 ${dropdowns.length} 个下拉菜单`);
+        
+        dropdowns.forEach((dropdown, index) => {
+            const toggle = dropdown.querySelector('.dropdown-toggle');
+            const menu = dropdown.querySelector('.dropdown-menu');
+            
+            if (toggle && menu) {
+                console.log(`下拉菜单 ${index + 1} 初始化完成`);
+                
+                // 确保样式正确
+                if (!toggle.style.cursor) {
+                    toggle.style.cursor = 'pointer';
+                }
+                
+                // 验证事件监听器
+                const hasListener = toggle.getAttribute('data-dropdown-initialized');
+                if (!hasListener) {
+                    toggle.setAttribute('data-dropdown-initialized', 'true');
+                    console.log(`为下拉菜单 ${index + 1} 添加事件监听器标记`);
+                }
+            } else {
+                console.warn(`下拉菜单 ${index + 1} 缺少必要元素`, { toggle, menu });
+            }
+        });
     }
 
     /**
